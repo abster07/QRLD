@@ -8,14 +8,14 @@ permissions:
   contents: write
 
 env:
-  APPVAULT_REPO: "abhinav0014/app-vault"
+  APPVAULT_REPO: "abster07/QRLD"
   APP_ID: "abhi-qrld"
+  APK_NAME: "QRLD.apk"
 
 jobs:
   build:
+    if: contains(github.event.head_commit.message, 'buildapp')
     runs-on: ubuntu-latest
-    outputs:
-      apk_name: app-release.apk
 
     steps:
       - name: Checkout
@@ -35,18 +35,21 @@ jobs:
       - name: Grant execute permission
         run: chmod +x ./gradlew
 
-      - name: Build Release APK
+      - name: Build APK
         run: ./gradlew assembleRelease
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
+      - name: Rename APK to universal name
+        run: mv app/build/outputs/apk/release/app-release.apk ${{ env.APK_NAME }}
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          path: ${{ env.APK_NAME }}
 
   release:
     runs-on: ubuntu-latest
@@ -68,14 +71,14 @@ jobs:
           tag_name: "build-${{ github.run_number }}"
           name: "Release build #${{ github.run_number }}"
           body: "Automated release from commit ${{ github.sha }}"
-          files: app-release.apk
+          files: ${{ env.APK_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set download URL
         id: url
         run: |
-          echo "download_url=https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/app-release.apk" >> $GITHUB_OUTPUT
+          echo "download_url=https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/${{ env.APK_NAME }}" >> $GITHUB_OUTPUT
 
   appvault:
     runs-on: ubuntu-latest
@@ -176,7 +179,7 @@ jobs:
               "iconUrl":     f"icons/{app_id}.png",
               "iconBg":      manifest.get("iconBg", ""),
               "tags":        manifest.get("tags", []),
-              "platforms":   manifest.get("platforms", ["android"]),
+              "platforms":   manifest.get("platforms"),
               "downloadUrl": download_url,
               "downloads":   downloads,
               "stars":       stars,
