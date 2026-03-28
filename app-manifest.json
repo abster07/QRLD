@@ -1,0 +1,8 @@
+{
+  "name": "QRLD",
+  "description": "A fast and easy-to-use QR Scanner & Maker app that lets you instantly scan any QR code or barcode and generate your own in seconds. Whether you’re opening links, sharing contact info, connecting to Wi-Fi, or creating custom codes for business or personal use, this app does it all with a clean interface and lightning-fast performance. Simple, reliable, and designed for everyday convenience.",
+  "iconBg": "linear-gradient(135deg,#1a0533,#6d28d9)",
+  "tags": ["qr scanner", "qr code", "barcode scanner", "qr generator", "qr maker", "scan", "create", "mobile", "utility", "productivity"],
+  "downloadUrl": "https://github.com/abhinav0014/livetv-player/releases/latest",
+  "version": "1.0"
+}
