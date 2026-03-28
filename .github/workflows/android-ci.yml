@@ -77,17 +77,23 @@ jobs:
         run: |
           echo "download_url=https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/app-release.apk" >> $GITHUB_OUTPUT
 
-  appvault:
+`appvault:
     runs-on: ubuntu-latest
     needs: release
 
     steps:
+      - name: Checkout source repo (for app-manifest.json)
+        uses: actions/checkout@v4
+        with:
+          path: source
+
       - name: Checkout AppVault repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.APPVAULT_REPO }}
-          token: ${{ secrets.APPVAULT_TOKEN }}
+          repository: abster07/app-vault
+          token: ${{ secrets.GITHUB_TOKEN }}
           path: appvault
+          persist-credentials: false
 
       - name: Fetch repo stats
         id: stats
@@ -119,16 +125,9 @@ jobs:
           echo "stars=$STARS" >> $GITHUB_OUTPUT
           echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
 
-      - name: Generate icon
+      - name: Use existing icon
         run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
-          convert -size 256x256 xc:"#6d28d9" icon.png
-
-      - name: Copy icon to AppVault
-        run: |
-          mkdir -p appvault/icons
-          cp icon.png appvault/icons/${{ env.APP_ID }}.png
+          cp source/app/src/main/res/ic_launcher-web.png appvault/icons/${{ env.APP_ID }}.png
 
       - name: Update apps.json
         run: |
@@ -138,36 +137,54 @@ jobs:
           import json, os, datetime
 
           JSON_PATH = "apps.json"
+          MANIFEST_PATH = "../source/app-manifest.json"
 
+          # Load existing apps.json
           try:
               with open(JSON_PATH) as f:
                   apps = json.load(f)
-          except:
+          except Exception:
               apps = []
 
-          app_id = os.environ["APP_ID"]
-          stars = int(os.environ["STARS"])
-          downloads = int(os.environ["DOWNLOADS"])
-          sha = os.environ["GITHUB_SHA"][:7]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          today = datetime.date.today().isoformat()
-          download_url = os.environ["DOWNLOAD_URL"]
+          # Load app-manifest.json from the source repo
+          try:
+              with open(MANIFEST_PATH) as f:
+                  manifest = json.load(f)
+          except Exception:
+              manifest = {}
+
+          app_id     = os.environ["APP_ID"]
+          apk_name   = os.environ["APK_NAME"]
+          stars      = int(os.environ["STARS"])
+          downloads  = int(os.environ["DOWNLOADS"])
+          sha        = os.environ["GITHUB_SHA"][:7]
+          repo       = os.environ["GITHUB_REPOSITORY"]
+          run_number = os.environ["GITHUB_RUN_NUMBER"]
+          today      = datetime.date.today().isoformat()
+
+          download_url = (
+              f"https://github.com/{repo}/releases/download/"
+              f"build-{run_number}/{apk_name}"
+          )
 
           entry = {
-              "id": app_id,
-              "name": app_id.replace("-", " ").title(),
-              "version": sha,
-              "description": "Android app",
-              "iconUrl": f"icons/{app_id}.png",
+              "id":          app_id,
+              # Prefer display name from manifest, fall back to slug
+              "name":        manifest.get("name", app_id.replace("-", " ").title()),
+              "version":     manifest.get("version", sha),
+              "description": manifest.get("description", "Android app"),
+              "iconUrl":     f"icons/{app_id}.png",
+              "iconBg":      manifest.get("iconBg", ""),
+              "tags":        manifest.get("tags", []),
+              "platforms":   manifest.get("platforms", ["android"]),
               "downloadUrl": download_url,
-              "downloads": downloads,
-              "stars": stars,
-              "updated": today,
-              "commit": sha
+              "downloads":   downloads,
+              "stars":       stars,
+              "updated":     today,
+              "commit":      sha
           }
 
           existing = next((a for a in apps if a["id"] == app_id), None)
-
           if existing:
               existing.update(entry)
           else:
@@ -176,13 +193,14 @@ jobs:
           with open(JSON_PATH, "w") as f:
               json.dump(apps, f, indent=2)
 
-          print("Updated apps.json")
+          print(f"Updated apps.json → {download_url}")
           PYEOF
         env:
           APP_ID: ${{ env.APP_ID }}
+          APK_NAME: ${{ env.APK_NAME }}
           STARS: ${{ steps.stats.outputs.stars }}
           DOWNLOADS: ${{ steps.stats.outputs.downloads }}
-          DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/app-release.apk
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
 
       - name: Publish to AppVault
         run: |
@@ -191,4 +209,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add apps.json icons/
           git commit -m "chore(${{ env.APP_ID }}): update from ${{ github.repository }}@${{ github.sha }}" || exit 0
-          git push
+          git push https://$PAT_TOKEN@github.com/abster07/app-vault.git
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_CLASSIC }}
