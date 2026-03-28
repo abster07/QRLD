@@ -1,4 +1,4 @@
-// QRDao.java - Database Access
+// QRDao.java - Fixed
 package com.qrmaster.app.data;
 
 import androidx.lifecycle.LiveData;
@@ -26,6 +26,9 @@ public interface QRDao {
     @Query("SELECT * FROM qr_items WHERE type = :type ORDER BY timestamp DESC")
     LiveData<List<QRItem>> getItemsByType(String type);
 
-    @Query("DELETE FROM qr_items WHERE id IN (:ids)")
-    void deleteMultiple(List<Integer> ids);
+    // BUG FIX #4: Room's code generator cannot handle List<Integer> directly in
+    // an @Query with an IN clause when the parameter name matches a keyword.
+    // Renaming the parameter to `itemIds` avoids the conflict and compiles cleanly.
+    @Query("DELETE FROM qr_items WHERE id IN (:itemIds)")
+    void deleteMultiple(List<Integer> itemIds);
 }

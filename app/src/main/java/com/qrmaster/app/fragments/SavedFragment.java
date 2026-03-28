@@ -1,4 +1,4 @@
-// SavedFragment.java - Enhanced with multi-select and delete all
+// SavedFragment.java - Fixed
 package com.qrmaster.app.fragments;
 
 import android.os.Bundle;
@@ -36,19 +36,25 @@ public class SavedFragment extends Fragment {
     private ActionMode actionMode;
     private List<QRItem> selectedItems = new ArrayList<>();
 
+    // BUG FIX #3: keep a local snapshot of saved items so showDeleteAllDialog()
+    // doesn't need to add a new observer (which stacked up and fired repeatedly).
+    private List<QRItem> currentSavedItems = new ArrayList<>();
+
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+    public View onCreateView(@NonNull LayoutInflater inflater,
+                             @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_saved, container, false);
-        
+
         recyclerView = view.findViewById(R.id.recycler_view);
-        emptyView = view.findViewById(R.id.empty_view);
-        toolbar = view.findViewById(R.id.toolbar);
-        
+        emptyView    = view.findViewById(R.id.empty_view);
+        toolbar      = view.findViewById(R.id.toolbar);
+
         setupToolbar();
-        
+
         viewModel = new ViewModelProvider(this).get(QRViewModel.class);
-        
+
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
         adapter = new QRAdapter(requireContext(), viewModel, new QRAdapter.OnItemClickListener() {
             @Override
@@ -56,7 +62,6 @@ public class SavedFragment extends Fragment {
                 if (actionMode != null) {
                     toggleSelection(item);
                 } else {
-                    // Show detail dialog
                     adapter.showDetailDialog(item, requireActivity());
                 }
             }
@@ -64,7 +69,8 @@ public class SavedFragment extends Fragment {
             @Override
             public void onItemLongClick(QRItem item) {
                 if (actionMode == null) {
-                    actionMode = ((AppCompatActivity) requireActivity()).startSupportActionMode(actionModeCallback);
+                    actionMode = ((AppCompatActivity) requireActivity())
+                            .startSupportActionMode(actionModeCallback);
                 }
                 toggleSelection(item);
             }
@@ -75,10 +81,13 @@ public class SavedFragment extends Fragment {
             }
         });
         recyclerView.setAdapter(adapter);
-        
+
+        // BUG FIX #3: cache the latest list so delete-all can use it directly
         viewModel.getSavedItems().observe(getViewLifecycleOwner(), items -> {
-            adapter.setItems(items);
-            if (items.isEmpty()) {
+            currentSavedItems = items != null ? items : new ArrayList<>();
+            adapter.setItems(currentSavedItems);
+
+            if (currentSavedItems.isEmpty()) {
                 emptyView.setVisibility(View.VISIBLE);
                 recyclerView.setVisibility(View.GONE);
             } else {
@@ -86,7 +95,7 @@ public class SavedFragment extends Fragment {
                 recyclerView.setVisibility(View.VISIBLE);
             }
         });
-        
+
         return view;
     }
 
@@ -94,13 +103,14 @@ public class SavedFragment extends Fragment {
         toolbar.setTitle("Saved");
         toolbar.inflateMenu(R.menu.saved_menu);
         toolbar.setOnMenuItemClickListener(item -> {
-            int itemId = item.getItemId();
-            if (itemId == R.id.action_delete_all) {
+            int id = item.getItemId();
+            if (id == R.id.action_delete_all) {
                 showDeleteAllDialog();
                 return true;
-            } else if (itemId == R.id.action_select_all) {
+            } else if (id == R.id.action_select_all) {
                 if (actionMode == null) {
-                    actionMode = ((AppCompatActivity) requireActivity()).startSupportActionMode(actionModeCallback);
+                    actionMode = ((AppCompatActivity) requireActivity())
+                            .startSupportActionMode(actionModeCallback);
                 }
                 selectAll();
                 return true;
@@ -115,9 +125,8 @@ public class SavedFragment extends Fragment {
         } else {
             selectedItems.add(item);
         }
-        
         adapter.setSelectedItems(selectedItems);
-        
+
         if (actionMode != null) {
             if (selectedItems.isEmpty()) {
                 actionMode.finish();
@@ -129,50 +138,41 @@ public class SavedFragment extends Fragment {
 
     private void selectAll() {
         selectedItems.clear();
-        viewModel.getSavedItems().observe(getViewLifecycleOwner(), items -> {
-            selectedItems.addAll(items);
-            adapter.setSelectedItems(selectedItems);
-            if (actionMode != null) {
-                actionMode.setTitle(selectedItems.size() + " selected");
-            }
-        });
+        selectedItems.addAll(currentSavedItems);   // use cached list — no new observer
+        adapter.setSelectedItems(selectedItems);
+        if (actionMode != null) {
+            actionMode.setTitle(selectedItems.size() + " selected");
+        }
     }
 
     private void showItemMenu(QRItem item) {
         String[] options = {"Delete", "Remove from Saved", "Share", "Edit"};
-        
         new MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Options")
-            .setItems(options, (dialog, which) -> {
-                switch (which) {
-                    case 0: // Delete
-                        deleteItem(item);
-                        break;
-                    case 1: // Remove from Saved
-                        removeFromSaved(item);
-                        break;
-                    case 2: // Share
-                        adapter.shareQRCode(item, requireContext());
-                        break;
-                    case 3: // Edit
-                        // TODO: Implement edit functionality
-                        Toast.makeText(requireContext(), "Edit coming soon", Toast.LENGTH_SHORT).show();
-                        break;
-                }
-            })
-            .show();
+                .setTitle("Options")
+                .setItems(options, (dialog, which) -> {
+                    switch (which) {
+                        case 0: deleteItem(item);          break;
+                        case 1: removeFromSaved(item);     break;
+                        case 2: adapter.shareQRCode(item, requireContext()); break;
+                        case 3:
+                            Toast.makeText(requireContext(), "Edit coming soon",
+                                    Toast.LENGTH_SHORT).show();
+                            break;
+                    }
+                })
+                .show();
     }
 
     private void deleteItem(QRItem item) {
         new MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Delete QR Code")
-            .setMessage("Are you sure you want to delete this QR code?")
-            .setPositiveButton("Delete", (dialog, which) -> {
-                viewModel.delete(item);
-                Toast.makeText(requireContext(), "Deleted", Toast.LENGTH_SHORT).show();
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+                .setTitle("Delete QR Code")
+                .setMessage("Are you sure you want to delete this QR code?")
+                .setPositiveButton("Delete", (d, w) -> {
+                    viewModel.delete(item);
+                    Toast.makeText(requireContext(), "Deleted", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void removeFromSaved(QRItem item) {
@@ -181,22 +181,31 @@ public class SavedFragment extends Fragment {
         Toast.makeText(requireContext(), "Removed from saved", Toast.LENGTH_SHORT).show();
     }
 
+    /**
+     * BUG FIX #3: The original code called getSavedItems().observe() inside the
+     * positive-button click handler. Every time the user opened and confirmed the
+     * dialog a NEW observer was registered, so on the second confirmation the
+     * delete would fire twice, three times on the third, etc.
+     *
+     * Fix: use the already-cached `currentSavedItems` list instead.
+     */
     private void showDeleteAllDialog() {
         new MaterialAlertDialogBuilder(requireContext())
-            .setTitle("Delete All Saved")
-            .setMessage("Are you sure you want to delete all saved QR codes?")
-            .setPositiveButton("Delete All", (dialog, which) -> {
-                viewModel.getSavedItems().observe(getViewLifecycleOwner(), items -> {
+                .setTitle("Delete All Saved")
+                .setMessage("Are you sure you want to delete all saved QR codes?")
+                .setPositiveButton("Delete All", (dialog, which) -> {
                     List<Integer> ids = new ArrayList<>();
-                    for (QRItem item : items) {
+                    for (QRItem item : currentSavedItems) {
                         ids.add(item.getId());
                     }
-                    viewModel.deleteMultiple(ids);
-                    Toast.makeText(requireContext(), "All saved items deleted", Toast.LENGTH_SHORT).show();
-                });
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+                    if (!ids.isEmpty()) {
+                        viewModel.deleteMultiple(ids);
+                        Toast.makeText(requireContext(), "All saved items deleted",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void deleteSelectedItems() {
@@ -205,21 +214,18 @@ public class SavedFragment extends Fragment {
             ids.add(item.getId());
         }
         viewModel.deleteMultiple(ids);
-        Toast.makeText(requireContext(), selectedItems.size() + " items deleted", Toast.LENGTH_SHORT).show();
-        
+        Toast.makeText(requireContext(),
+                selectedItems.size() + " items deleted", Toast.LENGTH_SHORT).show();
+
         selectedItems.clear();
         adapter.setSelectedItems(selectedItems);
-        
-        if (actionMode != null) {
-            actionMode.finish();
-        }
+        if (actionMode != null) actionMode.finish();
     }
 
-    private ActionMode.Callback actionModeCallback = new ActionMode.Callback() {
+    private final ActionMode.Callback actionModeCallback = new ActionMode.Callback() {
         @Override
         public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-            MenuInflater inflater = mode.getMenuInflater();
-            inflater.inflate(R.menu.action_mode_menu, menu);
+            mode.getMenuInflater().inflate(R.menu.action_mode_menu, menu);
             return true;
         }
 
@@ -230,14 +236,13 @@ public class SavedFragment extends Fragment {
 
         @Override
         public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-            int itemId = item.getItemId();
-            if (itemId == R.id.action_delete) {
+            if (item.getItemId() == R.id.action_delete) {
                 new MaterialAlertDialogBuilder(requireContext())
-                    .setTitle("Delete Selected")
-                    .setMessage("Delete " + selectedItems.size() + " items?")
-                    .setPositiveButton("Delete", (dialog, which) -> deleteSelectedItems())
-                    .setNegativeButton("Cancel", null)
-                    .show();
+                        .setTitle("Delete Selected")
+                        .setMessage("Delete " + selectedItems.size() + " items?")
+                        .setPositiveButton("Delete", (d, w) -> deleteSelectedItems())
+                        .setNegativeButton("Cancel", null)
+                        .show();
                 return true;
             }
             return false;
